@@ -1,118 +1,144 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:my_app/providers/todo_controller.dart';
 import '../models/todo.dart';
 import '../widgets/todo_tile.dart';
-import '../widgets/search_bar.dart';
 import 'add_todo.dart';
-import '../repositories/todo_repositories.dart';
 
-final TodoRepository repo = TodoRepository();
-
-class HomePage extends StatefulWidget {
+/// HomePage is the main screen of the Todo application.
+/// It displays a list of todos with options to add, toggle, and delete them.
+class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final todosAsync = ref.watch(todoControllerProvider);
 
-class _HomePageState extends State<HomePage> {
-  List<Todo> todos = [];
-  String searchQuery = "";
-
-  @override
-  void initState() {
-    super.initState();
-    loadTodos();
-  }
-
-  Future<void> loadTodos() async {
-    final data = await repo.getTodos();
-    setState(() {
-      todos = data;
-    });
-  }
-
-  List<Todo> get filteredTodos {
-    return todos
-        .where((t) => t.title.toLowerCase().contains(searchQuery.toLowerCase()))
-        .toList();
-  }
-
-  Future<void> addTodo(Todo todo) async {
-    await repo.createTodo(todo);
-    await loadTodos();
-  }
-
-  void deleteTodo(String id) {
-    setState(() {
-      todos.removeWhere((t) => t.id == id);
-      repo.delete(id);
-    });
-  }
-
-  Future<void> toggleTodo(String id, bool value) async {
-    final index = todos.indexWhere((t) => t.id == id);
-    if (index == -1) return;
-
-    setState(() {
-      todos[index].completed = value;
-    });
-    await repo.updateTodo(id, todos[index]);
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Todo List")),
-      body: Column(
-        children: [
-          TodoSearchBar(
-            onSearch: (value) {
-              setState(() {
-                searchQuery = value;
-              });
+      appBar: AppBar(
+        title: const Text("Todo List"),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: todosAsync.when(
+        data: (todos) {
+          if (todos.isEmpty) {
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.task_alt, size: 80, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'No tasks yet',
+                    style: TextStyle(fontSize: 18, color: Colors.grey),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Tap + to add a new task',
+                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: todos.length,
+            itemBuilder: (context, index) {
+              final todo = todos[index];
+              return TodoTile(
+                todo: todo,
+                onDelete: () {
+                  ref
+                      .read(todoControllerProvider.notifier)
+                      .deleteTodo(todo.id!);
+                  _showSnackBar(context, 'Task deleted');
+                },
+                onTap: () => _navigateToEditTodo(context, ref, todo),
+                onToggle: (value) {
+                  ref
+                      .read(todoControllerProvider.notifier)
+                      .toggleTodo(todo.id!, value ?? false);
+                },
+              );
             },
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (err, stack) => Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 16),
+              Text(
+                'Error loading tasks',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                err.toString(),
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () {
+                  ref.invalidate(todoControllerProvider);
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
           ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: filteredTodos.length,
-              itemBuilder: (context, index) {
-                final todo = filteredTodos[index];
-
-                return TodoTile(
-                  todo: todo,
-                  onDelete: () => deleteTodo(todo.id!),
-                  onToggle: (value) => toggleTodo(todo.id!, value!),
-                  onTap: () async {
-                    final updatedTodo = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AddTodoPage(existingTodo: todo),
-                      ),
-                    );
-
-                    if (updatedTodo != null) {
-                      setState(() {
-                        final actualIndex = todos.indexOf(todo);
-                        todos[actualIndex] = updatedTodo;
-                      });
-                    }
-                  },
-                );
-              },
-            ),
-          ),
-        ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
+        onPressed: () => _navigateToAddTodo(context, ref),
         child: const Icon(Icons.add),
-        onPressed: () async {
-          final todo = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AddTodoPage()),
-          );
+      ),
+    );
+  }
 
-          if (todo != null) addTodo(todo);
-        },
+  /// Navigate to the Add Todo page
+  void _navigateToAddTodo(BuildContext context, WidgetRef ref) async {
+    final result = await Navigator.push<Todo>(
+      context,
+      MaterialPageRoute(builder: (context) => const AddTodoPage()),
+    );
+
+    if (result != null && context.mounted) {
+      ref.read(todoControllerProvider.notifier).addTodo(result);
+      _showSnackBar(context, 'Task added');
+    }
+  }
+
+  /// Navigate to the Edit Todo page
+  void _navigateToEditTodo(
+    BuildContext context,
+    WidgetRef ref,
+    Todo todo,
+  ) async {
+    final result = await Navigator.push<Todo>(
+      context,
+      MaterialPageRoute(builder: (context) => AddTodoPage(existingTodo: todo)),
+    );
+
+    if (result != null && context.mounted) {
+      // Update the todo with new values
+      ref.read(todoControllerProvider.notifier).updateTodo(todo.id!, result);
+      _showSnackBar(context, 'Task updated');
+    }
+  }
+
+  /// Show a snackbar message
+  void _showSnackBar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
