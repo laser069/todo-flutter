@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
 
+/// A search bar widget for filtering todo items
 class TodoSearchBar extends StatelessWidget {
+  /// Callback when search text changes
   final Function(String) onSearch;
 
   const TodoSearchBar({super.key, required this.onSearch});
+
   @override
   Widget build(BuildContext context) {
-    // TODO: implement build
     return Padding(
-      padding: const EdgeInsetsGeometry.all(12),
+      padding: const EdgeInsets.all(12),
       child: TextField(
         decoration: const InputDecoration(
-          hint: Text("Search tasks..."),
+          hintText: 'Search tasks...',
           prefixIcon: Icon(Icons.search),
           prefixIconColor: Colors.grey,
+          border: OutlineInputBorder(),
+          filled: true,
         ),
         onChanged: onSearch,
       ),
